@@ -73,8 +73,8 @@ Option A: Run One Instance
 
 docker-compose up -d
 
-Service will be available at:
-➡️ http://localhost:7860/docs (if using FastAPI)
+Service will be available at (default port **8000**, configurable via `PORT` env variable):
+➡️ http://localhost:8000/docs (if using FastAPI)
 ➡️ or /sdapi/v1/txt2img for POST requests.
 
 Option B: Scale Multiple Instances
@@ -87,7 +87,7 @@ You can then load-balance or assign containers to parallel workloads.
 
 🧪 Example API Call
 
-curl -X POST http://localhost:7860/sdapi/v1/txt2img \
+curl -X POST http://localhost:8000/sdapi/v1/txt2img \
   -H 'Content-Type: application/json' \
   -d '{
     "prompt": "a rustic house with warm lighting, cinematic, wide-angle",
