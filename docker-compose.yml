@@ -1,9 +1,14 @@
 version: '3.8'
 services:
   sd-api:
-    build: .
+    build:
+      context: .
+      args:
+        PORT: 8000
+    environment:
+      - PORT=8000
     ports:
-      - "7860:7860"
+      - "8000:8000"
     volumes:
       - ./models:/models
       - ./output:/output

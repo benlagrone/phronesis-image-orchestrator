@@ -16,6 +16,8 @@ RUN chmod +x /app/entrypoint.sh
 
 VOLUME ["/models", "/output"]
 
-EXPOSE 7860
+ARG PORT=8000
+ENV PORT=${PORT}
+EXPOSE ${PORT}
 
 ENTRYPOINT ["/app/entrypoint.sh"]
