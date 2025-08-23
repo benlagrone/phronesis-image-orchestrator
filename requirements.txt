@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+safetensors
+pillow
+# GPU wheels; adjust if you want CPU-only
+torch --extra-index-url https://download.pytorch.org/whl/cu124
+torchvision --extra-index-url https://download.pytorch.org/whl/cu124
+diffusers
+transformers
+huggingface_hub
+python-dotenv

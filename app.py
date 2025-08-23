@@ -1,41 +1,41 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
-from diffusers import StableDiffusionPipeline
-import torch
+from typing import Optional
 import os
-from pathlib import Path
 
 app = FastAPI()
+pipe = None
 
-class Txt2ImgRequest(BaseModel):
-    prompt: str
-    negative_prompt: str | None = None
-    width: int = 512
-    height: int = 512
-    steps: int = 20
-    cfg_scale: float = 7.5
+def get_pipe():
+    global pipe
+    if pipe is None:
+        from diffusers import StableDiffusionPipeline
+        import torch
+        model_id = os.getenv("SD_MODEL", "runwayml/stable-diffusion-v1-5")
+        pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
+        if torch.cuda.is_available():
+            pipe.to("cuda")
+    return pipe
 
-MODEL_ID = os.environ.get("MODEL_ID", "runwayml/stable-diffusion-v1-5")
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+@app.get("/health")
+def health():
+    return {"ok": True}
 
-pipe = StableDiffusionPipeline.from_pretrained(
-    MODEL_ID, torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32
-)
-if DEVICE == "cuda":
-    pipe = pipe.to("cuda")
-
-@app.post("/sdapi/v1/txt2img")
-def txt2img(request: Txt2ImgRequest):
-    images = pipe(
-        request.prompt,
-        negative_prompt=request.negative_prompt,
-        width=request.width,
-        height=request.height,
-        num_inference_steps=request.steps,
-        guidance_scale=request.cfg_scale,
-    ).images
-    output_dir = Path("/output")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "output.png"
-    images[0].save(output_path)
-    return {"filename": str(output_path)}
+@app.post("/txt2img")
+def txt2img(prompt: str,
+            negative_prompt: Optional[str] = None,
+            width: int = 512,
+            height: int = 512,
+            steps: int = 25,
+            guidance: float = 7.5):
+    p = get_pipe()
+    image = p(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        width=width,
+        height=height,
+        num_inference_steps=steps,
+        guidance_scale=guidance
+    ).images[0]
+    out = "/tmp/out.png"
+    image.save(out)
+    return {"ok": True, "path": out}
