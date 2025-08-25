@@ -1,14 +1,19 @@
 services:
   sd-api:
-    build: .
-    container_name: sd-api
+    build:
+      context: .
+      args:
+        PORT: 8000
+    environment:
+      - PORT=8000
     ports:
       - "8000:8000"
-    environment:
-      - SD_MODEL=runwayml/stable-diffusion-v1-5
-    # GPU inside container (optional)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - capabilities: ["gpu"]
+    volumes:
+      - ./models:/models
+      - ./output:/output
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
