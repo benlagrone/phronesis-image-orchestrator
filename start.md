@@ -62,7 +62,9 @@ Then move your .safetensors and .ckpt files into the appropriate folders.
 
 3. Build the Docker Image
 
-docker build -t sd-api .
+```bash
+docker compose build
+```
 
 
 ⸻
@@ -71,15 +73,27 @@ docker build -t sd-api .
 
 Option A: Run One Instance
 
-docker-compose up -d
+```bash
+docker compose up -d
+```
 
-Service will be available at:
-➡️ http://localhost:7860/docs (if using FastAPI)
+> **Tip:** Older installations using `docker-compose` may throw `KeyError: 'ContainerConfig'` during build.
+> Disable BuildKit to work around it:
+>
+> ```bash
+> export DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0
+> docker-compose up -d
+> ```
+
+Service will be available at (default port **8000**, configurable via `PORT` env variable):
+➡️ http://localhost:8000/docs (if using FastAPI)
 ➡️ or /sdapi/v1/txt2img for POST requests.
 
 Option B: Scale Multiple Instances
 
-docker-compose up -d --scale sd-api=3
+```bash
+docker compose up -d --scale sd-api=3
+```
 
 You can then load-balance or assign containers to parallel workloads.
 
@@ -87,7 +101,7 @@ You can then load-balance or assign containers to parallel workloads.
 
 🧪 Example API Call
 
-curl -X POST http://localhost:7860/sdapi/v1/txt2img \
+curl -X POST http://localhost:8000/sdapi/v1/txt2img \
   -H 'Content-Type: application/json' \
   -d '{
     "prompt": "a rustic house with warm lighting, cinematic, wide-angle",
@@ -106,11 +120,15 @@ Output image will be saved inside the container and/or volume-mounted to /output
 
 To shut down all containers:
 
-docker-compose down
+```bash
+docker compose down
+```
 
 To scale up/down:
 
-docker-compose up -d --scale sd-api=N
+```bash
+docker compose up -d --scale sd-api=N
+```
 
 To monitor resource usage:
 
@@ -147,9 +165,3 @@ MIT License.
 ⸻
 
 ✝️ Bless this build to serve your vision with clarity and beauty.
-
-Would you like me to now generate:
-- The actual `Dockerfile`
-- `docker-compose.yml`
-- `entrypoint.sh`  
-…to go with this `start.md` so you can drop the entire folder into GitHub and go?
