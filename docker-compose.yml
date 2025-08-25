@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   sd-api:
     build:
@@ -17,3 +16,4 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
+

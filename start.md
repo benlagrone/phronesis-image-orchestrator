@@ -73,6 +73,7 @@ docker compose build
 
 Option A: Run One Instance
 
+
 ```bash
 docker compose up -d
 ```
@@ -84,6 +85,7 @@ docker compose up -d
 > export DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0
 > docker-compose up -d
 > ```
+
 
 Service will be available at (default port **8000**, configurable via `PORT` env variable):
 ➡️ http://localhost:8000/docs (if using FastAPI)
