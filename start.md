@@ -88,8 +88,9 @@ docker compose up -d
 
 
 Service will be available at (default port **8000**, configurable via `PORT` env variable):
-➡️ http://localhost:8000/docs (if using FastAPI)
-➡️ or /sdapi/v1/txt2img for POST requests.
+➡️ http://localhost:8000/docs (FastAPI docs)
+➡️ POST `/txt2img` to generate an image
+➡️ GET `/files/{filename}` to download generated images
 
 Option B: Scale Multiple Instances
 
@@ -103,18 +104,23 @@ You can then load-balance or assign containers to parallel workloads.
 
 🧪 Example API Call
 
-curl -X POST http://localhost:8000/sdapi/v1/txt2img \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt": "a rustic house with warm lighting, cinematic, wide-angle",
-    "negative_prompt": "blurry, extra limbs, text, watermark",
-    "width": 896,
-    "height": 1280,
-    "steps": 28,
-    "cfg_scale": 6.5
-  }'
+```bash
+curl -X POST 'http://localhost:8000/txt2img?prompt=a%20rustic%20house%20at%20sunset&width=768&height=512&steps=28&guidance=7.0'
+```
 
-Output image will be saved inside the container and/or volume-mounted to /output.
+Response:
+
+```json
+{ "ok": true, "path": "/output/out-<id>.png", "url": "http://localhost:8000/files/out-<id>.png" }
+```
+
+You can then download with:
+
+```bash
+wget http://localhost:8000/files/out-<id>.png -O out.png
+```
+
+All images are also saved to the host-mounted `./output` directory.
 
 ⸻
 

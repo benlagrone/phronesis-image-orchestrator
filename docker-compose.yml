@@ -6,6 +6,8 @@ services:
         PORT: 8000
     environment:
       - PORT=8000
+      - LOG_LEVEL=info
+      # - SD_MODEL=runwayml/stable-diffusion-v1-5
     ports:
       - "8000:8000"
     volumes:
@@ -16,4 +18,3 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
-
