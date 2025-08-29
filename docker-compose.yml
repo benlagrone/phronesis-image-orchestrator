@@ -12,7 +12,7 @@ services:
       - "8000:8000"
     volumes:
       - ./models:/models
-      - ./output:/output
+      - ${SD_OUTPUT_DIR:-./output}:/output
     deploy:
       resources:
         reservations:
