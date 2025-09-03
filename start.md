@@ -73,7 +73,6 @@ docker compose build
 
 Option A: Run One Instance
 
-
 ```bash
 docker compose up -d
 ```
@@ -102,16 +101,36 @@ You can then load-balance or assign containers to parallel workloads.
 
 ⸻
 
-🧪 Example API Call
+🧪 Example API Call (JSON)
+
+Use the JSON endpoint compatible with A1111-style payloads.
 
 ```bash
-curl -X POST 'http://localhost:8000/txt2img?prompt=a%20rustic%20house%20at%20sunset&width=768&height=512&steps=28&guidance=7.0'
+curl --location 'http://127.0.0.1:8000/sdapi/v1/txt2img' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "model": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+    "height": 720,
+    "width": 1280,
+    "steps": 20,
+    "cfg_scale": 8.5,
+    "seed": 931990,
+    "batch_size": 1,
+    "batch_count": 1,
+    "prompt": "a rustic house at sunset",
+    "negative_prompt": "blurry, noisy"
+  }'
 ```
 
 Response:
 
 ```json
-{ "ok": true, "path": "/output/out-<id>.png", "url": "http://localhost:8000/files/out-<id>.png" }
+{
+  "ok": true,
+  "count": 1,
+  "paths": ["/output/out-<id>.png"],
+  "urls": ["http://localhost:8000/files/out-<id>.png"]
+}
 ```
 
 You can then download with:
