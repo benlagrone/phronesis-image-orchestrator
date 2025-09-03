@@ -1,0 +1,22 @@
+Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors
+ProtoGen_X5.8-pruned-fp16.safetensors
+ProtoGen_X5.8.safetensors
+Put Stable Diffusion checkpoints here.txt
+Realistic_Vision_V6.0_NV_B1.safetensors
+Reliberate_v3-inpainting.safetensors
+Reliberate_v3.safetensors
+dreamshaper_8.safetensors
+eimisanimediffusion2_v20.safetensors
+flux_dev_close_up_animals.safetensors
+flux_dev_close_up_animals_000001500.safetensors
+lyriel_v16.safetensors
+model.ckpt
+pastelMixStylizedAnime_pastelMixPrunedFP16.safetensors
+princess_xl_v2.safetensors
+ral-medieval-manuscripts-flux.safetensors
+sd_xl_base_1.0.safetensors
+sd_xl_refiner_1.0.safetensors
+sdsFILM_v40-sdxl-V1.safetensors
+skin texture-noob-V5.safetensors
+v1-5-pruned-emaonly.safetensors
+wildlifexAnimals_wildlifexAnimals.safetensors
