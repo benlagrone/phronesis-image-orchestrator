@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import base64
 from io import BytesIO
 import os
@@ -254,22 +254,85 @@ async def validation_exception_logger(request: Request, exc: RequestValidationEr
         exc.errors(),
         body_preview,
     )
+    def _sanitize(obj: Any) -> Any:
+        if isinstance(obj, bytes):
+            return obj.decode("utf-8", errors="ignore")
+        if isinstance(obj, list):
+            return [_sanitize(x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        return obj
+
     return JSONResponse(
         status_code=422,
-        content={"ok": False, "detail": "Validation error", "errors": exc.errors()},
+        content={"ok": False, "detail": "Validation error", "errors": _sanitize(exc.errors())},
     )
 
 
+async def _coerce_payload(request: Request) -> Txt2ImgPayload:
+    """Accept JSON or form/query payloads and return a Txt2ImgPayload instance."""
+    # Try JSON first
+    data: Dict[str, Any] = {}
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+
+    if not data:
+        # Try form-encoded
+        try:
+            form = await request.form()
+            data = {k: v for k, v in form.items()}
+        except Exception:
+            data = {}
+
+    # Merge query params as fallback (do not overwrite explicit body fields)
+    try:
+        for k, v in request.query_params.items():
+            data.setdefault(k, v)
+    except Exception:
+        pass
+
+    # Map legacy names
+    if "guidance" in data and "cfg_scale" not in data:
+        data["cfg_scale"] = data.get("guidance")
+
+    # Coerce numeric fields
+    for key in ("width", "height", "steps", "batch_size", "batch_count"):
+        if key in data:
+            try:
+                data[key] = int(float(data[key]))
+            except Exception:
+                pass
+    if "cfg_scale" in data:
+        try:
+            data["cfg_scale"] = float(data["cfg_scale"])
+        except Exception:
+            pass
+    if "seed" in data and data["seed"] not in (None, ""):
+        try:
+            data["seed"] = int(float(data["seed"]))
+        except Exception:
+            pass
+
+    return Txt2ImgPayload(**data)
+
+
 @app.post("/txt2img")
-def txt2img_legacy(request: Request, payload: Txt2ImgPayload):
-    # Maintain old path but return A1111-compatible response for client compatibility
-    return txt2img_automatic1111_compat(request, payload)
+async def txt2img_legacy(request: Request):
+    # Accept JSON or form-encoded and return A1111-compatible response
+    payload = await _coerce_payload(request)
+    return await txt2img_automatic1111_compat(request, payload)
 
 
 @app.post("/sdapi/v1/txt2img")
-def txt2img_automatic1111_compat(request: Request, payload: Txt2ImgPayload):
+async def txt2img_automatic1111_compat(request: Request, payload: Optional[Txt2ImgPayload] = None):
     # A1111-compatible response shape: { images: [base64, ...], parameters, info }
     t0 = time.time()
+    if payload is None:
+        payload = await _coerce_payload(request)
     p = _load_pipeline(payload.model, payload.vae)
     items = _generate_and_save(p, payload)
     # Encode saved PNGs to base64
