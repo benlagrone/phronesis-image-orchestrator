@@ -35,6 +35,7 @@ class Txt2ImgPayload(BaseModel):
 
     # Model selection
     model: Optional[str] = None  # filename in /models/Stable-diffusion or HF repo id
+    vae: Optional[str] = None    # optional VAE filename in /models/VAE or HF repo id
 
     # Accepted but currently unused (placeholders for compatibility)
     sampler_index: Optional[str] = None
@@ -47,8 +48,20 @@ class Txt2ImgPayload(BaseModel):
     model_hash: Optional[str] = None
     version: Optional[str] = None
 
-def _load_pipeline(model_ref: Optional[str] = None):
-    from diffusers import StableDiffusionPipeline
+def _resolve_local_file(name: str, search_dirs: list[str]) -> Optional[str]:
+    if not name:
+        return None
+    if os.path.isabs(name) and os.path.exists(name):
+        return name
+    for d in search_dirs:
+        candidate = os.path.join(d, name)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _load_pipeline(model_ref: Optional[str] = None, vae_ref: Optional[str] = None):
+    from diffusers import AutoPipelineForText2Image, AutoencoderKL, StableDiffusionPipeline, StableDiffusionXLPipeline
     import torch
 
     # Determine reference: explicit payload model, else env SD_MODEL
@@ -56,25 +69,38 @@ def _load_pipeline(model_ref: Optional[str] = None):
     use_cuda = torch.cuda.is_available()
     dtype = torch.float16 if use_cuda else torch.float32
 
-    # If looks like a local single file (.ckpt/.safetensors), build absolute path
+    # If looks like a local single file (.ckpt/.safetensors), resolve against known model dirs
     if isinstance(ref, str) and (ref.endswith(".ckpt") or ref.endswith(".safetensors")):
-        candidate = ref
-        if not os.path.isabs(candidate):
-            candidate = os.path.join("/models/Stable-diffusion", ref)
-        if not os.path.exists(candidate):
-            raise HTTPException(status_code=400, detail=f"Model file not found: {candidate}")
+        candidate = _resolve_local_file(ref, [
+            "/models/Stable-diffusion",
+            "/models",
+        ])
+        if not candidate:
+            raise HTTPException(status_code=400, detail=f"Model file not found: /models/Stable-diffusion/{ref}")
         key = f"single:{candidate}"
         if key in _pipeline_cache:
-            return _pipeline_cache[key]
-        logger.info(f"Loading pipeline from single file: {candidate}")
-        pipe = StableDiffusionPipeline.from_single_file(candidate, torch_dtype=dtype)
+            pipe = _pipeline_cache[key]
+        else:
+            logger.info(f"Loading pipeline (auto) from single file: {candidate}")
+            # Auto-detect SD v1 vs SDXL
+            try:
+                pipe = AutoPipelineForText2Image.from_single_file(candidate, torch_dtype=dtype)
+            except Exception:
+                # Fallback to explicit pipelines
+                try:
+                    pipe = StableDiffusionXLPipeline.from_single_file(candidate, torch_dtype=dtype)
+                except Exception:
+                    pipe = StableDiffusionPipeline.from_single_file(candidate, torch_dtype=dtype)
+            _pipeline_cache[key] = pipe
     else:
         # HF repo id or local directory
         key = f"pretrained:{ref}"
         if key in _pipeline_cache:
-            return _pipeline_cache[key]
-        logger.info(f"Loading pipeline from pretrained: {ref}")
-        pipe = StableDiffusionPipeline.from_pretrained(ref, torch_dtype=dtype)
+            pipe = _pipeline_cache[key]
+        else:
+            logger.info(f"Loading pipeline (auto) from pretrained: {ref}")
+            pipe = AutoPipelineForText2Image.from_pretrained(ref, torch_dtype=dtype)
+            _pipeline_cache[key] = pipe
 
     if use_cuda:
         pipe.to("cuda")
@@ -82,7 +108,28 @@ def _load_pipeline(model_ref: Optional[str] = None):
     else:
         logger.info("Using CPU for inference (float32)")
 
-    _pipeline_cache[key] = pipe
+    # Optional VAE override
+    if vae_ref:
+        vae_path = None
+        if isinstance(vae_ref, str) and (vae_ref.endswith(".safetensors") or vae_ref.endswith(".ckpt") or os.path.isdir(vae_ref)):
+            vae_path = _resolve_local_file(vae_ref, [
+                "/models/VAE",
+                "/models/vae",
+                "/models/Stable-diffusion",
+                "/models",
+            ]) or (vae_ref if os.path.isabs(vae_ref) and os.path.exists(vae_ref) else None)
+        try:
+            if vae_path and os.path.exists(vae_path):
+                logger.info(f"Loading VAE from file/dir: {vae_path}")
+                vae = AutoencoderKL.from_pretrained(vae_path, torch_dtype=dtype)
+                pipe.vae = vae
+            elif isinstance(vae_ref, str) and not vae_path:
+                logger.info(f"Loading VAE from pretrained repo: {vae_ref}")
+                vae = AutoencoderKL.from_pretrained(vae_ref, torch_dtype=dtype)
+                pipe.vae = vae
+        except Exception as e:
+            logger.warning(f"Failed to load VAE '{vae_ref}': {e}")
+
     return pipe
 
 @app.get("/health")
@@ -143,7 +190,7 @@ def _generate_and_save(pipeline, payload: Txt2ImgPayload) -> List[Dict[str, str]
 def _txt2img_impl(request: Request, payload: Txt2ImgPayload):
     t0 = time.time()
     try:
-        p = _load_pipeline(payload.model)
+        p = _load_pipeline(payload.model, payload.vae)
         logger.info(
             "txt2img json size=%dx%d steps=%d cfg=%.2f seed=%s model=%s",
             payload.width,
