@@ -226,24 +226,21 @@ curl --location 'http://127.0.0.1:8000/sdapi/v1/txt2img' \
   }'
 ```
 
-Response:
+Response (A1111-compatible):
 
 ```json
 {
-  "ok": true,
-  "count": 1,
-  "paths": ["/output/out-<id>.png"],
-  "urls": ["http://localhost:8000/files/out-<id>.png"]
+  "images": ["<base64_png>"] ,
+  "parameters": { ... },
+  "info": ""
 }
 ```
 
-You can then download with:
+To save locally:
 
 ```bash
-wget http://localhost:8000/files/out-<id>.png -O out.png
+jq -r '.images[0]' < resp.json | base64 --decode > out.png
 ```
-
-All images are also saved to the host-mounted `./output` directory.
 
 ⸻
 
@@ -262,6 +259,49 @@ docker compose up -d --scale sd-api=3
 ```
 
 Replace `3` with the desired number of replicas.
+
+---
+
+## ⬇️ Download Outputs to Local (rsync)
+
+Sync Ubuntu host Pictures to your local Mac `~/Pictures`, skipping existing files:
+
+```bash
+# From your Mac
+REMOTE_HOST=your-server-ip \
+REMOTE_USER=master-benjamin \
+REMOTE_DIR=/home/master-benjamin/Pictures \
+LOCAL_DIR=$HOME/Pictures \
+rsync -avh --ignore-existing --progress -e ssh "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR/" "$LOCAL_DIR/"
+```
+
+Or use the helper script in this repo:
+
+```bash
+REMOTE_HOST=your-server-ip REMOTE_USER=master-benjamin ./scripts/sync_pictures.sh
+```
+
+---
+
+## 🌐 Browse Images via Webhost
+
+A tiny Nginx service serves your Ubuntu Pictures folder.
+
+Start it:
+
+```bash
+docker compose up -d images-web
+```
+
+Open in a browser:
+
+```
+http://<server-ip>:8080/images.html   # redirects to a directory listing
+```
+
+Notes:
+- The webhost serves files from `SD_OUTPUT_DIR` mounted at `/usr/share/nginx/html/images`.
+- It’s read-only and auto-indexed; no code changes required.
 
 To monitor resource usage:
 
