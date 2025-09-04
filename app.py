@@ -3,6 +3,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict
+import base64
+from io import BytesIO
 import os
 import uuid
 import time
@@ -259,5 +261,23 @@ def txt2img_legacy(request: Request, payload: Txt2ImgPayload):
 
 @app.post("/sdapi/v1/txt2img")
 def txt2img_automatic1111_compat(request: Request, payload: Txt2ImgPayload):
-    # New JSON endpoint similar to A1111 path
-    return _txt2img_impl(request, payload)
+    # A1111-compatible response shape: { images: [base64, ...], parameters, info }
+    t0 = time.time()
+    p = _load_pipeline(payload.model, payload.vae)
+    items = _generate_and_save(p, payload)
+    # Encode saved PNGs to base64
+    images_b64: List[str] = []
+    for it in items:
+        try:
+            with open(it["path"], "rb") as f:
+                b = f.read()
+            images_b64.append(base64.b64encode(b).decode("utf-8"))
+        except Exception as e:
+            logger.warning(f"Failed to base64-encode {it['path']}: {e}")
+    duration = time.time() - t0
+    logger.info(f"Generated {len(items)} image(s) in {duration:.2f}s (A1111 response)")
+    return {
+        "images": images_b64,
+        "parameters": payload.dict(),
+        "info": "",
+    }
