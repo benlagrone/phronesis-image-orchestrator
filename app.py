@@ -12,14 +12,21 @@ import logging
 from starlette.staticfiles import StaticFiles
 
 log_level = os.getenv("LOG_LEVEL", "info").upper()
-logging.basicConfig(
-    level=getattr(logging, log_level, logging.INFO),
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
+level_value = getattr(logging, log_level, logging.INFO)
+
+# Avoid double logging: let uvicorn configure root; configure only our app logger
+app_logger = logging.getLogger("sd-api")
+app_logger.setLevel(level_value)
+if not app_logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    app_logger.addHandler(_h)
+# Don't propagate to root to prevent duplicate lines
+app_logger.propagate = False
 
 app = FastAPI()
 app.mount("/files", StaticFiles(directory="/output"), name="files")
-logger = logging.getLogger("sd-api")
+logger = app_logger
 _pipeline_cache: Dict[str, object] = {}
 
 
@@ -255,8 +262,8 @@ async def validation_exception_logger(request: Request, exc: RequestValidationEr
 
 @app.post("/txt2img")
 def txt2img_legacy(request: Request, payload: Txt2ImgPayload):
-    # Maintain old path but switch to JSON body
-    return _txt2img_impl(request, payload)
+    # Maintain old path but return A1111-compatible response for client compatibility
+    return txt2img_automatic1111_compat(request, payload)
 
 
 @app.post("/sdapi/v1/txt2img")
