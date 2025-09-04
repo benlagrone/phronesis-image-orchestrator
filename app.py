@@ -89,6 +89,26 @@ def _load_pipeline(model_ref: Optional[str] = None):
 def health():
     return {"ok": True}
 
+
+@app.get("/sdapi/v1/models")
+def list_models():
+    base_dir = "/models/Stable-diffusion"
+    exts = (".safetensors", ".ckpt")
+    items = []
+    try:
+        for name in sorted(os.listdir(base_dir)):
+            if not name.lower().endswith(exts):
+                continue
+            path = os.path.join(base_dir, name)
+            try:
+                size = os.path.getsize(path)
+            except Exception:
+                size = None
+            items.append({"model_name": name, "path": path, "size_bytes": size})
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail=f"Models directory not found: {base_dir}")
+    return {"ok": True, "count": len(items), "models": items}
+
 def _generate_and_save(pipeline, payload: Txt2ImgPayload) -> List[Dict[str, str]]:
     import torch
 
