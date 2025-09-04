@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 import os
@@ -6,6 +6,9 @@ import uuid
 import time
 import logging
 from starlette.staticfiles import StaticFiles
+
+log_level = os.getenv("LOG_LEVEL", "info").upper()
+logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
 
 app = FastAPI()
 app.mount("/files", StaticFiles(directory="/output"), name="files")
@@ -45,30 +48,34 @@ def _load_pipeline(model_ref: Optional[str] = None):
 
     # Determine reference: explicit payload model, else env SD_MODEL
     ref = model_ref or os.getenv("SD_MODEL", "runwayml/stable-diffusion-v1-5")
+    use_cuda = torch.cuda.is_available()
+    dtype = torch.float16 if use_cuda else torch.float32
 
     # If looks like a local single file (.ckpt/.safetensors), build absolute path
     if isinstance(ref, str) and (ref.endswith(".ckpt") or ref.endswith(".safetensors")):
         candidate = ref
         if not os.path.isabs(candidate):
             candidate = os.path.join("/models/Stable-diffusion", ref)
+        if not os.path.exists(candidate):
+            raise HTTPException(status_code=400, detail=f"Model file not found: {candidate}")
         key = f"single:{candidate}"
         if key in _pipeline_cache:
             return _pipeline_cache[key]
         logger.info(f"Loading pipeline from single file: {candidate}")
-        pipe = StableDiffusionPipeline.from_single_file(candidate, torch_dtype=torch.float16)
+        pipe = StableDiffusionPipeline.from_single_file(candidate, torch_dtype=dtype)
     else:
         # HF repo id or local directory
         key = f"pretrained:{ref}"
         if key in _pipeline_cache:
             return _pipeline_cache[key]
         logger.info(f"Loading pipeline from pretrained: {ref}")
-        pipe = StableDiffusionPipeline.from_pretrained(ref, torch_dtype=torch.float16)
+        pipe = StableDiffusionPipeline.from_pretrained(ref, torch_dtype=dtype)
 
-    if torch.cuda.is_available():
+    if use_cuda:
         pipe.to("cuda")
         logger.info("Moved pipeline to CUDA")
     else:
-        logger.info("Using CPU for inference")
+        logger.info("Using CPU for inference (float32)")
 
     _pipeline_cache[key] = pipe
     return pipe
@@ -110,23 +117,30 @@ def _generate_and_save(pipeline, payload: Txt2ImgPayload) -> List[Dict[str, str]
 
 def _txt2img_impl(request: Request, payload: Txt2ImgPayload):
     t0 = time.time()
-    p = _load_pipeline(payload.model)
-    logger.info(
-        "txt2img json size=%dx%d steps=%d cfg=%.2f seed=%s model=%s",
-        payload.width,
-        payload.height,
-        payload.steps,
-        payload.cfg_scale,
-        str(payload.seed),
-        str(payload.model),
-    )
+    try:
+        p = _load_pipeline(payload.model)
+        logger.info(
+            "txt2img json size=%dx%d steps=%d cfg=%.2f seed=%s model=%s",
+            payload.width,
+            payload.height,
+            payload.steps,
+            payload.cfg_scale,
+            str(payload.seed),
+            str(payload.model),
+        )
 
-    items = _generate_and_save(p, payload)
-    duration = time.time() - t0
-    base = str(request.base_url).rstrip("/")
-    urls = [f"{base}/files/{it['filename']}" for it in items]
-    logger.info(f"Generated {len(items)} image(s) in {duration:.2f}s")
-    return {"ok": True, "count": len(items), "paths": [it["path"] for it in items], "urls": urls}
+        items = _generate_and_save(p, payload)
+        duration = time.time() - t0
+        base = str(request.base_url).rstrip("/")
+        urls = [f"{base}/files/{it['filename']}" for it in items]
+        logger.info(f"Generated {len(items)} image(s) in {duration:.2f}s")
+        return {"ok": True, "count": len(items), "paths": [it["path"] for it in items], "urls": urls}
+    except HTTPException:
+        # already structured; just bubble up
+        raise
+    except Exception as e:
+        logger.exception("txt2img failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/txt2img")
