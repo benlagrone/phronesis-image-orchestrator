@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 import os
@@ -8,7 +10,10 @@ import logging
 from starlette.staticfiles import StaticFiles
 
 log_level = os.getenv("LOG_LEVEL", "info").upper()
-logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 app = FastAPI()
 app.mount("/files", StaticFiles(directory="/output"), name="files")
@@ -141,6 +146,42 @@ def _txt2img_impl(request: Request, payload: Txt2ImgPayload):
     except Exception as e:
         logger.exception("txt2img failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_logger(request: Request, exc: HTTPException):
+    try:
+        body = await request.body()
+        body_preview = body[:500].decode("utf-8", errors="ignore") if body else ""
+    except Exception:
+        body_preview = "<unavailable>"
+    logger.warning(
+        "HTTP %s at %s: %s | body: %s",
+        exc.status_code,
+        request.url.path,
+        str(exc.detail),
+        body_preview,
+    )
+    return JSONResponse(status_code=exc.status_code, content={"ok": False, "detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_logger(request: Request, exc: RequestValidationError):
+    try:
+        body = await request.body()
+        body_preview = body[:500].decode("utf-8", errors="ignore") if body else ""
+    except Exception:
+        body_preview = "<unavailable>"
+    logger.warning(
+        "Validation error at %s: %s | body: %s",
+        request.url.path,
+        exc.errors(),
+        body_preview,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"ok": False, "detail": "Validation error", "errors": exc.errors()},
+    )
 
 
 @app.post("/txt2img")

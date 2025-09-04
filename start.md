@@ -91,17 +91,121 @@ Service will be available at (default port **8000**, configurable via `PORT` env
 ➡️ POST `/txt2img` to generate an image
 ➡️ GET `/files/{filename}` to download generated images
 
-Option B: Scale Multiple Instances
+Option B: Scale Multiple Instances (optional)
 
 ```bash
 docker compose up -d --scale sd-api=3
 ```
 
-You can then load-balance or assign containers to parallel workloads.
+Notes:
+- Replace `3` with any integer (e.g., `1`, `2`, `4`).
+- Do not use a literal `N`. If you want a variable: `COUNT=3 docker compose up -d --scale sd-api=$COUNT`.
+- You can scale up/down later with the same command.
 
 ⸻
 
-🧪 Example API Call (JSON)
+## 🔧 Environment (.env)
+
+Create a `.env` file in the repo root to point the service at your models and output directories. Use absolute paths (Compose does not expand `~`).
+
+Examples:
+
+MacOS:
+
+```
+SD_MODELS_DIR=/Users/yourname/sd-models
+SD_OUTPUT_DIR=/Users/yourname/sd-outputs  # optional (defaults to ./output)
+LOG_LEVEL=debug                           # optional
+```
+
+Ubuntu:
+
+```
+SD_MODELS_DIR=/home/youruser/sd-models
+SD_OUTPUT_DIR=/home/youruser/sd-outputs   # optional (defaults to ./output)
+LOG_LEVEL=debug                           # optional
+```
+
+Notes:
+- Ensure `SD_MODELS_DIR` exists on the same host where you run `docker compose`.
+- The folder must contain `Stable-diffusion/` with your `.safetensors`/`.ckpt` files.
+
+## 📸 Output Directory (Pinned)
+
+This project uses the container path `/output` for generated images. Docker Compose maps it via `SD_OUTPUT_DIR`.
+
+- Pinned output location (do not change unless explicitly requested):
+  - Ubuntu host: `SD_OUTPUT_DIR=/home/master-benjamin/Pictures`
+- Add to `.env` on the Ubuntu server:
+
+```
+SD_OUTPUT_DIR=/home/master-benjamin/Pictures
+```
+
+Access files at: `http://localhost:8000/files/<filename>`
+
+
+## ▶️ Start + Logs
+
+```
+docker network create fortress-phronesis-net || true
+docker compose up -d --build
+docker compose logs -f --tail=100 sd-api
+```
+
+Health check:
+
+```
+curl -s http://127.0.0.1:8000/health
+```
+
+## 📟 Watching Logs
+
+Common ways to view logs for the `sd-api` service:
+
+```
+# Follow live logs (recommended)
+docker compose logs -f --tail=100 sd-api
+
+# Show recent logs without following
+docker compose logs --tail=200 sd-api
+
+# Logs since a time window
+docker compose logs --since=10m sd-api
+
+# Run in foreground (prints logs to the terminal until Ctrl+C)
+docker compose up --build
+
+# If needed, get the container name and use docker logs directly
+docker compose ps
+docker logs -f <container_name>
+```
+
+## 🟢 Ubuntu Setup Commands (Copy/Paste)
+
+Run these on the Ubuntu host where you execute `docker compose`.
+
+```
+# 1) Create shared models dir (if needed)
+mkdir -p /home/master-benjamin/sd-models
+
+# 2) Create .env with pinned paths and verbose logging
+cat > .env << 'EOF'
+SD_MODELS_DIR=/home/master-benjamin/sd-models
+SD_OUTPUT_DIR=/home/master-benjamin/Pictures
+LOG_LEVEL=debug
+EOF
+
+# 3) Bring up the stack and follow logs
+docker network create fortress-phronesis-net || true
+docker compose up -d --build
+docker compose logs -f --tail=100 sd-api
+
+# 4) Health check
+curl -s http://127.0.0.1:8000/health
+```
+
+## 🧪 Example API Call (JSON)
 
 Use the JSON endpoint compatible with A1111-style payloads.
 
@@ -154,8 +258,10 @@ docker compose down
 To scale up/down:
 
 ```bash
-docker compose up -d --scale sd-api=N
+docker compose up -d --scale sd-api=3
 ```
+
+Replace `3` with the desired number of replicas.
 
 To monitor resource usage:
 
