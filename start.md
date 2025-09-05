@@ -181,6 +181,16 @@ docker compose ps
 docker logs -f <container_name>
 ```
 
+Increase verbosity (optional):
+
+```
+# In .env on the Ubuntu host
+LOG_LEVEL=debug
+VERBOSE_REQUEST_LOG=1
+```
+
+This logs parsed payload keys, prompt preview, model, size, steps, cfg, and timing per request.
+
 ## 🟢 Ubuntu Setup Commands (Copy/Paste)
 
 Run these on the Ubuntu host where you execute `docker compose`.

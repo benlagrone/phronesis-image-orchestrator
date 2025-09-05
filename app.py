@@ -30,6 +30,7 @@ app = FastAPI()
 app.mount("/files", StaticFiles(directory="/output"), name="files")
 logger = app_logger
 _pipeline_cache: Dict[str, object] = {}
+VERBOSE_REQUEST_LOG = os.getenv("VERBOSE_REQUEST_LOG", "0").lower() in ("1", "true", "yes", "on")
 
 
 class Txt2ImgPayload(BaseModel):
@@ -272,6 +273,15 @@ async def validation_exception_logger(request: Request, exc: RequestValidationEr
     )
 
 
+@app.middleware("http")
+async def request_timer(request: Request, call_next):
+    t0 = time.time()
+    resp = await call_next(request)
+    dt = time.time() - t0
+    logger.info("REQ %s %s -> %s in %.2fs", request.method, request.url.path, getattr(resp, "status_code", "-"), dt)
+    return resp
+
+
 async def _coerce_payload(request: Request) -> Txt2ImgPayload:
     """Accept JSON, form-encoded, or query-only payloads and return a Txt2ImgPayload."""
     data: Dict[str, Any] = {}
@@ -374,6 +384,14 @@ async def _coerce_payload(request: Request) -> Txt2ImgPayload:
         raise HTTPException(status_code=422, detail="Missing required field: prompt (send as JSON or form)")
 
     try:
+        if VERBOSE_REQUEST_LOG:
+            preview = str(data.get("prompt", ""))[:140].replace("\n", " ")
+            logger.debug(
+                "Parsed payload keys=%s size=%sx%s steps=%s cfg=%s seed=%s model=%s | prompt='%'",
+                sorted(list(data.keys())),
+                data.get("width"), data.get("height"), data.get("steps"), data.get("cfg_scale"), data.get("seed"), data.get("model"),
+                preview,
+            )
         return Txt2ImgPayload(**data)
     except Exception:
         # Convert Pydantic errors to HTTP 422 with clearer detail
@@ -394,6 +412,12 @@ async def txt2img_automatic1111_compat(request: Request, payload: Optional[Txt2I
     t0 = time.time()
     if payload is None:
         payload = await _coerce_payload(request)
+    if VERBOSE_REQUEST_LOG:
+        preview = (payload.prompt or "")[:140].replace("\n", " ")
+        logger.info(
+            "txt2img req size=%dx%d steps=%d cfg=%.2f seed=%s model=%s batch=%dx%d | prompt='%'",
+            payload.width, payload.height, payload.steps, payload.cfg_scale, str(payload.seed), str(payload.model), payload.batch_count, payload.batch_size, preview,
+        )
     p = _load_pipeline(payload.model, payload.vae)
     items = _generate_and_save(p, payload)
     # Encode saved PNGs to base64
