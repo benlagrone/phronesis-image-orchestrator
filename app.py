@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import base64
 from io import BytesIO
+import json
+from urllib.parse import parse_qs
 import os
 import uuid
 import time
@@ -54,6 +56,7 @@ class Txt2ImgPayload(BaseModel):
     hr_upscaler: Optional[str] = None
     denoising_strength: Optional[float] = None
     refiner_switch_at: Optional[float] = None
+    refiner_checkpoint: Optional[str] = None
     model_hash: Optional[str] = None
     version: Optional[str] = None
 
@@ -270,43 +273,92 @@ async def validation_exception_logger(request: Request, exc: RequestValidationEr
 
 
 async def _coerce_payload(request: Request) -> Txt2ImgPayload:
-    """Accept JSON or form/query payloads and return a Txt2ImgPayload instance."""
-    # Try JSON first
+    """Accept JSON, form-encoded, or query-only payloads and return a Txt2ImgPayload."""
     data: Dict[str, Any] = {}
-    try:
-        data = await request.json()
-        if not isinstance(data, dict):
-            data = {}
-    except Exception:
-        data = {}
+    ct = (request.headers.get("content-type") or "").lower()
 
-    if not data:
-        # Try form-encoded
+    # Read raw body once
+    raw: bytes = b""
+    try:
+        raw = await request.body()
+    except Exception:
+        raw = b""
+
+    # 1) Try JSON from raw
+    if raw:
+        try:
+            j = json.loads(raw)
+            if isinstance(j, dict):
+                data = j
+        except Exception:
+            pass
+
+    # 2) Try urlencoded parsing if still empty
+    if not data and raw:
+        try:
+            parsed = parse_qs(raw.decode("utf-8", errors="ignore"), keep_blank_values=True)
+            flat: Dict[str, Any] = {k: v[-1] if isinstance(v, list) else v for k, v in parsed.items()}
+            if flat:
+                data = flat
+        except Exception:
+            pass
+
+    # 3) As a last resort, try Starlette's form parser (multipart, etc.)
+    if not data and ("multipart/form-data" in ct or "application/x-www-form-urlencoded" in ct or not ct):
         try:
             form = await request.form()
             data = {k: v for k, v in form.items()}
         except Exception:
-            data = {}
+            pass
 
-    # Merge query params as fallback (do not overwrite explicit body fields)
+    # 4) Merge query params without overwriting body
     try:
         for k, v in request.query_params.items():
             data.setdefault(k, v)
     except Exception:
         pass
 
+    # Unwrap nested payloads like { "image": { ... } } or { "data": { ... } }
+    if isinstance(data, dict):
+        if "image" in data and isinstance(data["image"], dict):
+            data = data["image"]
+        elif "data" in data and isinstance(data["data"], dict):
+            data = data["data"]
+    # If form had a single field named 'image' containing JSON, try to parse it
+    if isinstance(data, dict) and not data:
+        for wrapper in ("image", "data"):
+            if wrapper in request.query_params:
+                try:
+                    maybe = json.loads(request.query_params[wrapper])  # type: ignore[arg-type]
+                    if isinstance(maybe, dict):
+                        data = maybe
+                        break
+                except Exception:
+                    pass
+    # Also check if earlier form parsing yielded a single 'image' key with JSON string
+    if isinstance(data, dict) and len(data) == 1:
+        for wrapper in ("image", "data"):
+            if wrapper in data and isinstance(data[wrapper], str):
+                try:
+                    maybe = json.loads(data[wrapper])  # type: ignore[arg-type]
+                    if isinstance(maybe, dict):
+                        data = maybe
+                        break
+                except Exception:
+                    pass
+
     # Map legacy names
     if "guidance" in data and "cfg_scale" not in data:
         data["cfg_scale"] = data.get("guidance")
 
-    # Coerce numeric fields
+    # Coerce numerics
     for key in ("width", "height", "steps", "batch_size", "batch_count"):
-        if key in data:
+        if key in data and data[key] not in (None, ""):
             try:
                 data[key] = int(float(data[key]))
             except Exception:
                 pass
-    if "cfg_scale" in data:
+    if "cfg_scale" in data and data["cfg_scale"] not in (None, ""):
         try:
             data["cfg_scale"] = float(data["cfg_scale"])
         except Exception:
@@ -317,7 +369,16 @@ async def _coerce_payload(request: Request) -> Txt2ImgPayload:
         except Exception:
             pass
 
-    return Txt2ImgPayload(**data)
+    # Ensure required field presence with a clearer error if missing
+    if not data.get("prompt"):
+        raise HTTPException(status_code=422, detail="Missing required field: prompt (send as JSON or form)")
+
+    try:
+        return Txt2ImgPayload(**data)
+    except Exception:
+        # Convert Pydantic errors to HTTP 422 with clearer detail
+        keys = ",".join(sorted(map(str, data.keys())))
+        raise HTTPException(status_code=422, detail=f"Invalid request body. Parsed keys: [{keys}]")
 
 
 @app.post("/txt2img")
