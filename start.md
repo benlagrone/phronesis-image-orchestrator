@@ -203,6 +203,7 @@ mkdir -p /home/master-benjamin/sd-models
 cat > .env << 'EOF'
 SD_MODELS_DIR=/home/master-benjamin/sd-models
 SD_OUTPUT_DIR=/home/master-benjamin/Pictures
+VERBOSE_REQUEST_LOG=1
 LOG_LEVEL=debug
 EOF
 

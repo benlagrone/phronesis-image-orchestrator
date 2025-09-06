@@ -29,6 +29,8 @@ services:
       - ${SD_OUTPUT_DIR:-./output}:/usr/share/nginx/html/images:ro
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/html/images.html:/usr/share/nginx/html/images.html:ro
+      - ${SD_VIDEOS_DIR:-/home/master-benjamin/Videos}:/usr/share/nginx/html/videos:ro
+      - ./nginx/html/images_index.html:/usr/share/nginx/html/images/index.html:ro
     networks:
       - fortress-phronesis-net
 
