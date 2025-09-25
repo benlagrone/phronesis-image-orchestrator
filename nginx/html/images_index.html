@@ -11,9 +11,10 @@
     h1 { margin: 0; font-size: 18px; }
     .container { padding: 16px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-    .card { border: 1px solid #0002; border-radius: 8px; overflow: hidden; background: #fff1; text-decoration: none; color: inherit; }
+    .card { border: 1px solid #0002; border-radius: 8px; overflow: hidden; background: #fff1; text-decoration: none; color: inherit; display: flex; flex-direction: column; }
     .thumb { display: block; width: 100%; height: 180px; object-fit: cover; background: #0002; }
-    .name { padding: 8px 10px; font-size: 12px; word-break: break-all; }
+    .name { padding: 8px 10px 4px; font-size: 12px; word-break: break-all; }
+    .stamp { padding: 0 10px 8px; font-size: 11px; opacity: 0.75; }
     .empty { opacity: 0.7; padding: 24px; text-align: center; }
     .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
     input[type="text"] { flex: 1; padding: 6px 8px; font-size: 14px; }
@@ -21,6 +22,38 @@
   </style>
   <script>
     const LIST_URL = '/_list/images/';
+    const metaCache = new Map();
+
+    function formatTimestamp(date) {
+      if (!date) return 'Unknown';
+      try {
+        return date.toLocaleString();
+      } catch (err) {
+        return date.toISOString();
+      }
+    }
+
+    async function getFileMeta(name) {
+      if (metaCache.has(name)) return metaCache.get(name);
+      const url = '/images/' + encodeURIComponent(name);
+      let createdAt = null;
+      try {
+        const res = await fetch(url, { method: 'HEAD' });
+        const header = res.headers.get('last-modified');
+        if (header) {
+          const parsed = new Date(header);
+          if (!Number.isNaN(parsed.valueOf())) {
+            createdAt = parsed;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load metadata for', name, err);
+      }
+      const meta = { createdAt };
+      metaCache.set(name, meta);
+      return meta;
+    }
+
     async function loadImages() {
       const res = await fetch(LIST_URL);
       const html = await res.text();
@@ -43,14 +76,26 @@
         document.getElementById('count').textContent = '0';
         return;
       }
+      const entries = await Promise.all(filtered.map(async name => {
+        const meta = await getFileMeta(name);
+        return { name, ...meta };
+      }));
+      entries.sort((a, b) => {
+        const aTime = a.createdAt ? a.createdAt.getTime() : 0;
+        const bTime = b.createdAt ? b.createdAt.getTime() : 0;
+        if (bTime === aTime) return a.name.localeCompare(b.name);
+        return bTime - aTime;
+      });
+
       const frag = document.createDocumentFragment();
-      for (const name of filtered.sort()) {
+      for (const { name, createdAt } of entries) {
         const url = '/images/' + encodeURIComponent(name);
         const a = document.createElement('a');
         a.className = 'card';
         a.href = url; a.target = '_blank';
         a.innerHTML = `<img class="thumb" src="${url}" alt="${name}" loading="lazy" />`+
-                      `<div class=\"name\">${name}</div>`;
+                      `<div class=\"name\">${name}</div>`+
+                      `<div class=\"stamp\">Created ${formatTimestamp(createdAt)}</div>`;
         frag.appendChild(a);
       }
       grid.appendChild(frag);
@@ -84,4 +129,3 @@
   </div>
 </body>
 </html>
-
