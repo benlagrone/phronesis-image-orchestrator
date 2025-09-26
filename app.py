@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -11,6 +13,8 @@ import os
 import uuid
 import time
 import logging
+
+import torch
 from starlette.staticfiles import StaticFiles
 
 log_level = os.getenv("LOG_LEVEL", "info").upper()
@@ -31,6 +35,10 @@ app.mount("/files", StaticFiles(directory="/output"), name="files")
 logger = app_logger
 _pipeline_cache: Dict[str, object] = {}
 VERBOSE_REQUEST_LOG = os.getenv("VERBOSE_REQUEST_LOG", "0").lower() in ("1", "true", "yes", "on")
+
+_generation_lock = asyncio.Semaphore(max(1, int(os.getenv("SD_MAX_CONCURRENT", "1"))))
+SD_SDXL_MAX_PIXELS = int(os.getenv("SD_SDXL_MAX_PIXELS", "600000"))
+SD_DEFAULT_MAX_PIXELS = int(os.getenv("SD_MAX_PIXELS", "1200000"))
 
 
 class Txt2ImgPayload(BaseModel):
@@ -61,6 +69,34 @@ class Txt2ImgPayload(BaseModel):
     model_hash: Optional[str] = None
     version: Optional[str] = None
 
+
+def _is_sdxl_reference(model_ref: Optional[str]) -> bool:
+    if not model_ref:
+        return False
+    name = model_ref.lower()
+    return "sdxl" in name or "stable-diffusion-xl" in name or name.endswith("-xl")
+
+
+def _effective_model_ref(payload_model: Optional[str]) -> str:
+    return payload_model or os.getenv("SD_MODEL", "runwayml/stable-diffusion-v1-5")
+
+
+def _guard_payload_limits(payload: Txt2ImgPayload) -> None:
+    model_ref = _effective_model_ref(payload.model)
+    pixels = int(payload.width) * int(payload.height)
+    batches = max(1, int(payload.batch_size) * int(payload.batch_count))
+    total_pixels = pixels * batches
+    limit = SD_SDXL_MAX_PIXELS if _is_sdxl_reference(model_ref) else SD_DEFAULT_MAX_PIXELS
+    if total_pixels > limit:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Requested image dimensions exceed the configured GPU limit. "
+                "Reduce width/height or batch size."
+            ),
+        )
+
+
 def _resolve_local_file(name: str, search_dirs: list[str]) -> Optional[str]:
     if not name:
         return None
@@ -75,7 +111,6 @@ def _resolve_local_file(name: str, search_dirs: list[str]) -> Optional[str]:
 
 def _load_pipeline(model_ref: Optional[str] = None, vae_ref: Optional[str] = None):
     from diffusers import AutoPipelineForText2Image, AutoencoderKL, StableDiffusionPipeline, StableDiffusionXLPipeline
-    import torch
 
     # Determine reference: explicit payload model, else env SD_MODEL
     ref = model_ref or os.getenv("SD_MODEL", "runwayml/stable-diffusion-v1-5")
@@ -114,6 +149,19 @@ def _load_pipeline(model_ref: Optional[str] = None, vae_ref: Optional[str] = Non
             logger.info(f"Loading pipeline (auto) from pretrained: {ref}")
             pipe = AutoPipelineForText2Image.from_pretrained(ref, torch_dtype=dtype)
             _pipeline_cache[key] = pipe
+
+    if hasattr(pipe, "enable_attention_slicing"):
+        pipe.enable_attention_slicing()
+    if hasattr(pipe, "enable_vae_slicing"):
+        try:
+            pipe.enable_vae_slicing()
+        except Exception:
+            logger.debug("enable_vae_slicing not available on pipeline")
+    if os.getenv("SD_ENABLE_XFORMERS", "1").lower() not in ("0", "false", "no", "off") and hasattr(pipe, "enable_xformers_memory_efficient_attention"):
+        try:
+            pipe.enable_xformers_memory_efficient_attention()
+        except Exception as exc:
+            logger.info(f"xFormers attention not enabled: {exc}")
 
     if use_cuda:
         pipe.to("cuda")
@@ -328,12 +376,12 @@ async def _coerce_payload(request: Request) -> Txt2ImgPayload:
     except Exception:
         pass
 
-    # Unwrap nested payloads like { "image": { ... } } or { "data": { ... } }
+    # Unwrap payloads that are entirely nested under a single wrapper key
     if isinstance(data, dict):
-        if "image" in data and isinstance(data["image"], dict):
-            data = data["image"]
-        elif "data" in data and isinstance(data["data"], dict):
-            data = data["data"]
+        for wrapper_key in ("image", "data", "payload"):
+            if set(data.keys()) == {wrapper_key} and isinstance(data.get(wrapper_key), dict):
+                data = data[wrapper_key]
+                break
     # If form had a single field named 'image' containing JSON, try to parse it
     if isinstance(data, dict) and not data:
         for wrapper in ("image", "data"):
@@ -356,6 +404,108 @@ async def _coerce_payload(request: Request) -> Txt2ImgPayload:
                         break
                 except Exception:
                     pass
+
+    # Normalize structured request bodies (prompt/model/settings grouping)
+    if isinstance(data, dict):
+        def pick(d: Optional[Dict[str, Any]], *keys: str) -> Optional[Any]:
+            if not isinstance(d, dict):
+                return None
+            for key in keys:
+                if key in d and d[key] not in (None, ""):
+                    return d[key]
+            return None
+
+        prompt_block = data.get("prompt") if isinstance(data.get("prompt"), dict) else None
+        if prompt_block:
+            main_prompt = pick(prompt_block, "text", "positive", "value", "prompt")
+            if isinstance(main_prompt, str) and main_prompt.strip():
+                data["prompt"] = main_prompt
+            else:
+                fallback_parts = [v.strip() for v in prompt_block.values() if isinstance(v, str) and v.strip()]
+                if fallback_parts:
+                    data["prompt"] = "\n".join(fallback_parts)
+            neg_prompt = pick(prompt_block, "negative", "negative_prompt", "negativePrompt", "negativeText")
+            if isinstance(neg_prompt, str) and neg_prompt.strip() and not isinstance(data.get("negative_prompt"), str):
+                data["negative_prompt"] = neg_prompt
+
+        settings_block: Optional[Dict[str, Any]] = None
+        for key in ("settings", "params", "config", "generation", "options"):
+            candidate = data.get(key)
+            if isinstance(candidate, dict):
+                settings_block = candidate
+                break
+
+        size_sources: list[Dict[str, Any]] = []
+        for source in (data.get("image"), data.get("render"), data.get("size"), settings_block):
+            if isinstance(source, dict):
+                size_sources.append(source)
+                for nested_key in ("size", "dimensions", "resolution", "shape"):
+                    nested = source.get(nested_key)
+                    if isinstance(nested, dict):
+                        size_sources.append(nested)
+
+        def pull_numeric(field: str, aliases: tuple[str, ...]) -> None:
+            if field in data and data[field] not in (None, ""):
+                return
+            for src in size_sources:
+                val = pick(src, *aliases)
+                if val not in (None, ""):
+                    data[field] = val
+                    return
+
+        pull_numeric("width", ("width", "w"))
+        pull_numeric("height", ("height", "h"))
+
+        sampling_sources: list[Dict[str, Any]] = []
+        for source in (data.get("sampling"), data.get("sampler"), settings_block):
+            if isinstance(source, dict):
+                sampling_sources.append(source)
+                for nested_key in ("sampling", "sampler", "steping"):
+                    nested = source.get(nested_key)
+                    if isinstance(nested, dict):
+                        sampling_sources.append(nested)
+
+        def pull_from_sources(field: str, aliases: tuple[str, ...], sources: list[Dict[str, Any]]) -> None:
+            if field in data and data[field] not in (None, ""):
+                return
+            for src in sources:
+                val = pick(src, *aliases)
+                if val not in (None, ""):
+                    data[field] = val
+                    return
+
+        pull_from_sources("steps", ("steps", "step_count"), sampling_sources)
+        pull_from_sources("cfg_scale", ("cfg", "cfg_scale", "guidance", "guidance_scale"), sampling_sources)
+        pull_from_sources("seed", ("seed", "random_seed"), sampling_sources)
+
+        batch_sources: list[Dict[str, Any]] = []
+        for source in (data.get("batch"), settings_block):
+            if isinstance(source, dict):
+                batch_sources.append(source)
+                nested = source.get("batch") if isinstance(source.get("batch"), dict) else None
+                if nested:
+                    batch_sources.append(nested)
+
+        pull_from_sources("batch_size", ("size", "batch_size", "per_batch"), batch_sources)
+        pull_from_sources("batch_count", ("count", "batch_count", "batches"), batch_sources)
+
+        model_block = data.get("model") if isinstance(data.get("model"), dict) else None
+        if model_block:
+            model_id = pick(model_block, "id", "name", "path", "model", "identifier")
+            data["model"] = model_id if model_id not in (None, "") else None
+            vae_id = pick(model_block, "vae", "vae_id", "vae_name")
+            if vae_id not in (None, "") and (data.get("vae") in (None, "") or isinstance(data.get("vae"), dict)):
+                data["vae"] = vae_id
+        elif isinstance(data.get("model"), dict):
+            data["model"] = None
+
+        vae_block = data.get("vae") if isinstance(data.get("vae"), dict) else None
+        if vae_block:
+            vae_id = pick(vae_block, "id", "name", "path", "identifier", "vae")
+            data["vae"] = vae_id if vae_id not in (None, "") else None
+
+    if isinstance(data.get("prompt"), dict):
+        raise HTTPException(status_code=422, detail="Invalid prompt block; expected string text field")
 
     # Map legacy names
     if "guidance" in data and "cfg_scale" not in data:
@@ -409,17 +559,34 @@ async def txt2img_legacy(request: Request):
 @app.post("/sdapi/v1/txt2img")
 async def txt2img_automatic1111_compat(request: Request, payload: Optional[Txt2ImgPayload] = None):
     # A1111-compatible response shape: { images: [base64, ...], parameters, info }
-    t0 = time.time()
-    if payload is None:
-        payload = await _coerce_payload(request)
-    if VERBOSE_REQUEST_LOG:
-        preview = (payload.prompt or "")[:140].replace("\n", " ")
-        logger.info(
-            "txt2img req size=%dx%d steps=%d cfg=%.2f seed=%s model=%s batch=%dx%d | prompt='%'",
-            payload.width, payload.height, payload.steps, payload.cfg_scale, str(payload.seed), str(payload.model), payload.batch_count, payload.batch_size, preview,
-        )
-    p = _load_pipeline(payload.model, payload.vae)
-    items = _generate_and_save(p, payload)
+    async with _generation_lock:
+        t0 = time.time()
+        if payload is None:
+            payload = await _coerce_payload(request)
+        _guard_payload_limits(payload)
+        if VERBOSE_REQUEST_LOG:
+            preview = (payload.prompt or "")[:140].replace("\n", " ")
+            logger.info(
+                "txt2img req size=%dx%d steps=%d cfg=%.2f seed=%s model=%s batch=%dx%d | prompt='%'",
+                payload.width, payload.height, payload.steps, payload.cfg_scale, str(payload.seed), str(payload.model), payload.batch_count, payload.batch_size, preview,
+            )
+        try:
+            p = _load_pipeline(payload.model, payload.vae)
+            items = _generate_and_save(p, payload)
+        except RuntimeError as exc:
+            message = str(exc)
+            if "CUDA out of memory" in message:
+                logger.warning("Generation rejected due to CUDA OOM: %s", message)
+                if torch.cuda.is_available():
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        logger.debug("Failed to empty CUDA cache after OOM", exc_info=True)
+                raise HTTPException(
+                    status_code=503,
+                    detail="GPU out of memory for requested parameters. Reduce size or batch and retry.",
+                ) from exc
+            raise
     # Encode saved PNGs to base64
     images_b64: List[str] = []
     for it in items:
