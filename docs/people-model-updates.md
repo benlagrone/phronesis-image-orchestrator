@@ -9,7 +9,8 @@ The following models are well regarded for generating photorealistic or stylised
 - **Download:**
   ```bash
   wget "https://huggingface.co/SG161222/RealVisXL_V4.0/resolve/main/RealVisXL_V4.0.safetensors" \
-       -O ~/sd-models/RealVisXL_V4.0.safetensors
+       -O ~/sd-models/Stable-diffusion/RealVisXL_V4.0.safetensors
+
   ```
 
 ## Photon v1 (SDXL)
@@ -17,7 +18,8 @@ The following models are well regarded for generating photorealistic or stylised
 - **Download:**
   ```bash
   wget "https://huggingface.co/ByteDance/Photon/resolve/main/Photon_v1.safetensors" \
-       -O ~/sd-models/Photon_v1.safetensors
+       -O ~/sd-models/Stable-diffusion/Photon_v1.safetensors
+
   ```
 
 ## AbsoluteReality v1.8.1 (SD 1.5)
@@ -25,7 +27,8 @@ The following models are well regarded for generating photorealistic or stylised
 - **Download:**
   ```bash
   wget "https://huggingface.co/WarriorMama777/AbsoluteReality_v1.8.1/resolve/main/AbsoluteReality_v1.8.1.safetensors" \
-       -O ~/sd-models/AbsoluteReality_v1.8.1.safetensors
+       -O ~/sd-models/Stable-diffusion/AbsoluteReality_v1.8.1.safetensors
+
   ```
 
 ## CopaxRealistic Vision v6 (SD 1.5)
@@ -33,7 +36,8 @@ The following models are well regarded for generating photorealistic or stylised
 - **Download:**
   ```bash
   wget "https://huggingface.co/cerspense/anything-v5.0/resolve/main/CopaxRealisticVisionV6.safetensors" \
-       -O ~/sd-models/CopaxRealisticVisionV6.safetensors
+       -O ~/sd-models/Stable-diffusion/CopaxRealisticVisionV6.safetensors
+
   ```
 
 ## RevAnimated v1.2.2 (SD 1.5)
@@ -41,7 +45,8 @@ The following models are well regarded for generating photorealistic or stylised
 - **Download:**
   ```bash
   wget "https://huggingface.co/andite/anything-v4.0/resolve/main/RevAnimated_v1.2.2.safetensors" \
-       -O ~/sd-models/RevAnimated_v1.2.2.safetensors
+       -O ~/sd-models/Stable-diffusion/RevAnimated_v1.2.2.safetensors
+
   ```
 
 ## Usage Tips
