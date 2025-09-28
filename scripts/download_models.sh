@@ -49,7 +49,7 @@ download_diffusers_repo() {
   echo "[info] === $name (Diffusers repo: $repo) ==="
   rm -rf "$target.tmp"
   mkdir -p "$target.tmp"
-  if hf download "$repo" --repo-type model --include "*" --local-dir "$target.tmp" --overwrite; then
+  if hf download "$repo" --repo-type model --include "*" --local-dir "$target.tmp"; then
     rm -rf "$target"
     mv "$target.tmp" "$target"
     echo "[info] -> stored at $target"
@@ -64,7 +64,7 @@ download_checkpoint() {
   local file="${spec##*:}"
   local target="$BASE_DIR/$dest"
   echo "[info] === $dest (checkpoint: $repo/$file) ==="
-  hf download "$repo" "$file" --repo-type model --local-dir "$BASE_DIR" --overwrite
+  hf download "$repo" "$file" --repo-type model --local-dir "$BASE_DIR"
   echo "[info] -> stored at $target"
 }
 
