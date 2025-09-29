@@ -12,7 +12,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ${SD_MODELS_DIR:-./models}:/models:ro
+      - ${SD_MODELS_DIR:-./models}:/models
       - ${SD_OUTPUT_DIR:-./output}:/output
     networks:
       - fortress-phronesis-net

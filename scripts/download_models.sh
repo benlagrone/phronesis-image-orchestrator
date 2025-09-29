@@ -42,6 +42,13 @@ declare -A CHECKPOINT_SOURCES=(
   [Googh23/Realistic_Vision_v6:Realistic_Vision_V6.safetensors]="Realistic_Vision_V6.safetensors"
 )
 
+# checkpoint_dir|checkpoint_filename|profile (sd15 or sdxl)
+CONVERSION_TARGETS=(
+  "Juggernaut-XL_v9-diffusers|Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors|sdxl"
+  "Realistic_Vision_v6-diffusers|Realistic_Vision_V6.safetensors|sd15"
+  "AbsoluteReality_v1.8.1-diffusers|AbsoluteReality_v1.8.1.safetensors|sd15"
+)
+
 download_diffusers_repo() {
   local name="$1"
   local repo="$2"
@@ -68,6 +75,40 @@ download_checkpoint() {
   echo "[info] -> stored at $target"
 }
 
+convert_checkpoint_to_diffusers() {
+  local rel_dir="$1"
+  local checkpoint_file="$2"
+  local profile="$3"
+  local abs_checkpoint="$BASE_DIR/$checkpoint_file"
+
+  if [[ ! -f "$abs_checkpoint" ]]; then
+    echo "[warn] Conversion skipped; checkpoint not found: $abs_checkpoint"
+    return
+  fi
+
+  local dest_dir="/models/Stable-diffusion/$rel_dir"
+  local convert_cmd
+  case "$profile" in
+    sdxl)
+      convert_cmd="python -m diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_to_diffusers --checkpoint_path '$abs_checkpoint' --dump_path '$dest_dir' --from_safetensors --pipeline_class StableDiffusionXLPipeline"
+      ;;
+    sd15)
+      convert_cmd="python -m diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_to_diffusers --checkpoint_path '$abs_checkpoint' --dump_path '$dest_dir' --from_safetensors"
+      ;;
+    *)
+      echo "[warn] Unknown conversion profile '$profile' for $checkpoint_file" >&2
+      return
+      ;;
+  esac
+
+  echo "[info] Converting $checkpoint_file -> $dest_dir ($profile)"
+  if docker compose exec -T sd-api bash -lc "$convert_cmd"; then
+    echo "[info] Conversion finished: $dest_dir"
+  else
+    echo "[warn] Conversion failed for $checkpoint_file" >&2
+  fi
+}
+
 echo "[info] Starting Diffusers repo downloads"
 for name in "${!DIFFUSERS_SOURCES[@]}"; do
   download_diffusers_repo "$name" "${DIFFUSERS_SOURCES[$name]}"
@@ -76,6 +117,12 @@ done
 echo "[info] Starting single checkpoint downloads"
 for spec in "${!CHECKPOINT_SOURCES[@]}"; do
   download_checkpoint "$spec" "${CHECKPOINT_SOURCES[$spec]}"
+done
+
+echo "[info] Converting checkpoints to Diffusers format"
+for entry in "${CONVERSION_TARGETS[@]}"; do
+  IFS='|' read -r rel_dir checkpoint profile <<<"$entry"
+  convert_checkpoint_to_diffusers "$rel_dir" "$checkpoint" "$profile"
 done
 
 echo "[info] All requested downloads attempted. Review $LOG_FILE for details."
