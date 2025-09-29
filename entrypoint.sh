@@ -66,6 +66,16 @@ convert_checkpoint \
   "/models/Stable-diffusion/AbsoluteReality_v1.8.1-diffusers" \
   sd15
 
+convert_checkpoint \
+  "/models/Stable-diffusion/ProtoGen_X5.8-pruned-fp16.safetensors" \
+  "/models/Stable-diffusion/ProtoGen_X5.8-pruned-fp16" \
+  sd15
+
+convert_checkpoint \
+  "/models/Stable-diffusion/ProtoGen_X5.8.safetensors" \
+  "/models/Stable-diffusion/ProtoGen_X5.8" \
+  sd15
+
 LOG_LEVEL=${LOG_LEVEL:-info}
 export PYTHONUNBUFFERED=1
 echo "Starting uvicorn on port ${PORT:-8000} with log-level ${LOG_LEVEL}"
