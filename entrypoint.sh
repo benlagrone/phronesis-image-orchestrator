@@ -19,31 +19,30 @@ convert_checkpoint() {
   rm -rf "$dest"
   mkdir -p "$dest"
 
-  local modules=(
-    "diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_to_diffusers"
-    "diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_checkpoint"
-    "diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_checkpoint_to_diffusers"
-  )
+  echo "[entrypoint] Converting $src -> $dest via AutoPipeline"
+  if python - "$src" "$dest" <<'PY'
+import sys
+from pathlib import Path
+import torch
+from diffusers import AutoPipelineForText2Image
 
-  local success=0
-  for module in "${modules[@]}"; do
-    local cmd
-    printf -v cmd "python -m %s --checkpoint_path %q --dump_path %q --from_safetensors" "$module" "$src" "$dest"
-    if [[ "$profile" == "sdxl" ]]; then
-      cmd+=" --pipeline_class StableDiffusionXLPipeline"
-    fi
+src = Path(sys.argv[1])
+dest = Path(sys.argv[2])
 
-    echo "[entrypoint] Converting with $module"
-    if eval "$cmd"; then
-      success=1
-      echo "[entrypoint] Conversion complete: $dest"
-      break
-    else
-      echo "[entrypoint] Conversion via $module failed" >&2
-    fi
-  done
-
-  if [[ $success -eq 0 ]]; then
+try:
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    pipe = AutoPipelineForText2Image.from_single_file(src.as_posix(), torch_dtype=dtype)
+    pipe.save_pretrained(dest.as_posix())
+    pipe = None
+    print(f"[entrypoint] Saved pipeline to {dest}")
+except Exception as exc:
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+PY
+  then
+    echo "[entrypoint] Conversion complete: $dest"
+  else
     echo "[entrypoint] Conversion failed for $src" >&2
   fi
 }
