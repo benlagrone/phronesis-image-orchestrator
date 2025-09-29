@@ -83,18 +83,22 @@ def _effective_model_ref(payload_model: Optional[str]) -> str:
 
 def _guard_payload_limits(payload: Txt2ImgPayload) -> None:
     model_ref = _effective_model_ref(payload.model)
-    pixels = int(payload.width) * int(payload.height)
-    batches = max(1, int(payload.batch_size) * int(payload.batch_count))
-    total_pixels = pixels * batches
+    width = int(payload.width)
+    height = int(payload.height)
+    batch = max(1, int(payload.batch_size) * int(payload.batch_count))
+    total_pixels = width * height * batch
+
     limit = SD_SDXL_MAX_PIXELS if _is_sdxl_reference(model_ref) else SD_DEFAULT_MAX_PIXELS
+
     if total_pixels > limit:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Requested image dimensions exceed the configured GPU limit. "
-                "Reduce width/height or batch size."
-            ),
-        )
+        max_side = 1024 if _is_sdxl_reference(model_ref) else 832
+        factor_w = min(1.0, max_side / width)
+        factor_h = min(1.0, max_side / height)
+        factor = min(factor_w, factor_h, (limit / max(width * height, 1)) ** 0.5)
+        payload.width = max(64, int(width * factor) // 8 * 8)
+        payload.height = max(64, int(height * factor) // 8 * 8)
+        payload.batch_size = 1
+        payload.batch_count = 1
 
 
 def _resolve_local_file(name: str, search_dirs: list[str]) -> Optional[str]:

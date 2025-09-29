@@ -67,11 +67,6 @@ convert_checkpoint \
   sd15
 
 convert_checkpoint \
-  "/models/Stable-diffusion/ProtoGen_X5.8-pruned-fp16.safetensors" \
-  "/models/Stable-diffusion/ProtoGen_X5.8-pruned-fp16" \
-  sd15
-
-convert_checkpoint \
   "/models/Stable-diffusion/ProtoGen_X5.8.safetensors" \
   "/models/Stable-diffusion/ProtoGen_X5.8" \
   sd15
