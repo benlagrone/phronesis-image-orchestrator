@@ -19,23 +19,26 @@ convert_checkpoint() {
   rm -rf "$dest"
   mkdir -p "$dest"
 
-  echo "[entrypoint] Converting $src -> $dest via AutoPipeline"
-  if python - "$src" "$dest" <<'PY'
+  echo "[entrypoint] Converting $src -> $dest via Diffusers pipeline"
+  if python - "$src" "$dest" "$profile" <<'PY'
 import sys
 from pathlib import Path
 import torch
-from diffusers import AutoPipelineForText2Image
+from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
 
 src = Path(sys.argv[1])
 dest = Path(sys.argv[2])
+profile = sys.argv[3]
+
+PipelineClass = StableDiffusionXLPipeline if profile == "sdxl" else StableDiffusionPipeline
 
 try:
     dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    pipe = AutoPipelineForText2Image.from_single_file(src.as_posix(), torch_dtype=dtype)
+    pipe = PipelineClass.from_single_file(src.as_posix(), torch_dtype=dtype)
     pipe.save_pretrained(dest.as_posix())
-    pipe = None
+    del pipe
     print(f"[entrypoint] Saved pipeline to {dest}")
-except Exception as exc:
+except Exception:
     import traceback
     traceback.print_exc()
     sys.exit(1)
