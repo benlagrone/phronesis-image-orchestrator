@@ -19,27 +19,31 @@ convert_checkpoint() {
   rm -rf "$dest"
   mkdir -p "$dest"
 
-  local cmd=(python -m diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_to_diffusers
-             --checkpoint_path "$src"
-             --dump_path "$dest"
-             --from_safetensors)
+  local modules=(
+    "diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_to_diffusers"
+    "diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_checkpoint"
+    "diffusers.pipelines.stable_diffusion.convert_original_stable_diffusion_checkpoint_to_diffusers"
+  )
 
-  case "$profile" in
-    sdxl)
-      cmd+=(--pipeline_class StableDiffusionXLPipeline)
-      ;;
-    sd15)
-      ;; # default pipeline
-    *)
-      echo "[entrypoint] Unknown conversion profile '$profile' for $src; skipping"
-      return
-      ;;
-  esac
+  local success=0
+  for module in "${modules[@]}"; do
+    local cmd
+    printf -v cmd "python -m %s --checkpoint_path %q --dump_path %q --from_safetensors" "$module" "$src" "$dest"
+    if [[ "$profile" == "sdxl" ]]; then
+      cmd+=" --pipeline_class StableDiffusionXLPipeline"
+    fi
 
-  echo "[entrypoint] Converting $src -> $dest ($profile)"
-  if "${cmd[@]}"; then
-    echo "[entrypoint] Conversion complete: $dest"
-  else
+    echo "[entrypoint] Converting with $module"
+    if eval "$cmd"; then
+      success=1
+      echo "[entrypoint] Conversion complete: $dest"
+      break
+    else
+      echo "[entrypoint] Conversion via $module failed" >&2
+    fi
+  done
+
+  if [[ $success -eq 0 ]]; then
     echo "[entrypoint] Conversion failed for $src" >&2
   fi
 }
